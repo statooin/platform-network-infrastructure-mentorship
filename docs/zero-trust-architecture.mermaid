@@ -1,0 +1,43 @@
+graph TD
+    %% Define Styles
+    classDef external fill:#f9d0c4,stroke:#333,stroke-width:2px;
+    classDef edgeProxy fill:#ffeaa7,stroke:#e17055,stroke-width:3px;
+    classDef boundary fill:#dfe6e9,stroke:#636e72,stroke-width:2px,stroke-dasharray: 5 5;
+    classDef pod fill:#55efc4,stroke:#00b894,stroke-width:2px;
+    classDef secure fill:#74b9ff,stroke:#0984e3,stroke-width:2px;
+
+    %% External Entity
+    User((External Client)):::external
+
+    %% Edge Layer
+    subgraph Edge Layer [DMZ / Edge Network]
+        Envoy[Envoy / WASM Gateway<br/>(TLS Termination, Rate Limiting)]:::edgeProxy
+    end
+
+    %% Internal Zero Trust Network
+    subgraph Zero Trust Segment [Cilium eBPF Boundary / Internal VPC]
+        direction TB
+        
+        Auth[SPIRE / Identity Provider<br/>(Issues SVIDs)]:::secure
+        
+        subgraph Inference Cluster
+            PodA[LLM Inference Pod A<br/>(gRPC Service)]:::pod
+            PodB[LLM Inference Pod B<br/>(gRPC Service)]:::pod
+        end
+        
+        VectorDB[(Vector Database<br/>Milvus/Qdrant)]:::secure
+    end
+
+    %% Traffic Flow & Relationships
+    User -- "HTTPS (TLS 1.3)<br/>Public API Request" --> Envoy
+    Envoy -- "Issues short-lived certs" --> Auth
+    Auth -- "Validates Identity" --> Envoy
+
+    Envoy -- "mTLS (Identity Verified)<br/>Cilium L7 Policy Allow" --> PodA
+    Envoy -- "mTLS (Identity Verified)<br/>Cilium L7 Policy Allow" --> PodB
+
+    PodA -- "mTLS (TCP/19530)<br/>Cilium L4 Policy Allow" --> VectorDB
+    PodB -- "mTLS (TCP/19530)<br/>Cilium L4 Policy Allow" --> VectorDB
+
+    %% Explicit Deny Example
+    PodA -. "Unauthorized Access<br/>(BLOCKED by eBPF)" .-> PodB
